@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Circle Weave</title>
+    <style>
+        h1 {
+            text-align: center;
+            color: #333;
+            margin: 20px 0;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            display: block;
+            margin: 10px auto;
+        }
+        body {
+            background: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        .controls {
+            width: 80%;
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .slider-container {
+            margin: 10px 0;
+        }
+        .slider-container label {
+            display: inline-block;
+            width: 150px;
+            margin-right: 10px;
+        }
+        .slider-container input {
+            width: 200px;
+        }
+        .slider-container span {
+            margin-left: 10px;
+            min-width: 40px;
+            display: inline-block;
+        }
+        .button-container {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        button {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Circle Weave</h1>
+    <div class="controls" style="margin-bottom: 20px;">
+        <div class="slider-container">
+            <label for="maxRadius">Max Circle Size:</label>
+            <input type="range" id="maxRadius" min="10" max="100" value="50">
+            <span id="maxRadiusValue">50</span>
+        </div>
+        <div class="slider-container">
+            <label for="growthSpeed">Growth Speed:</label>
+            <input type="range" id="growthSpeed" min="0.1" max="5" value="1" step="0.1">
+            <span id="growthSpeedValue">1x</span>
+        </div>
+        <div class="slider-container">
+            <label for="palette">Color Palette:</label>
+            <select id="palette">
+                <option value="pastel">Pastel Colors</option>
+                <option value="earth">Earth Tones</option>
+                <option value="vibrant">Vibrant Colors</option>
+                <option value="cool">Cool Colors</option>
+                <option value="warm">Warm Colors</option>
+                <option value="monochrome">Monochrome</option>
+            </select>
+        </div>
+        <div class="button-container">
+            <button id="restart">Start</button>
+            <button id="download">Download Image</button>
+        </div>
+    </div>
+    
+    <canvas id="circleCanvas" width="800" height="600"></canvas>
+
+    <script>
+        // Circle class
+        class Circle {
+            constructor(x, y, maxRadius, color) {
+                this.x = x;
+                this.y = y;
+                this.radius = 1; // start small
+                this.maxRadius = maxRadius;
+                this.color = color;
+                this.growing = true;
+            }
+
+            // Check if the circle would hit the canvas edge or other circles at next growth step
+            hitsEdgeOrOtherCircles(circles) {
+                const nextRadius = this.radius + parseFloat(growthSpeedInput.value);
+                
+                if (this.x + nextRadius >= canvas.width || 
+                    this.x - nextRadius <= 0 || 
+                    this.y + nextRadius >= canvas.height || 
+                    this.y - nextRadius <= 0) {
+                    return true;
+                }
+                // Check collision with other circles
+                for (let other of circles) {
+                    if (other === this) continue;
+                    let dist = Math.hypot(this.x - other.x, this.y - other.y);
+                    if (dist <= nextRadius + other.radius) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Increase the circle's size
+            grow() {
+                if (this.growing && this.radius < this.maxRadius) {
+                    this.radius += parseFloat(growthSpeedInput.value); // Growth speed controlled
+                }
+            }
+
+            // Draw the circle only if it's larger than minimum size
+            draw(ctx) {
+                if (this.radius >= 5) {  // Only draw if radius is at least 5 pixels
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+                    ctx.fillStyle = this.color;
+                    ctx.fill();
+                }
+            }
+        }
+
+        // Get the canvas and context
+        const canvas = document.getElementById('circleCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Get controls
+        const maxRadiusInput = document.getElementById('maxRadius');
+        const growthSpeedInput = document.getElementById('growthSpeed');
+        const paletteInput = document.getElementById('palette');
+        const restartButton = document.getElementById('restart');
+
+        // Store circles
+        let circles = [];
+
+        // Predefined color palettes
+        const palettes = {
+            pastel: ['#FFB3BA', '#FFDFBA', '#FFFFBA', '#BAFFC9', '#BAE1FF'],
+            earth: ['#8B4513', '#CD853F', '#DEB887', '#F4A460', '#D2691E'],
+            vibrant: ['#FF5722', '#4CAF50', '#2196F3', '#FFC107', '#E91E63']
+        };
+
+        // Generate a random color from the selected palette
+        function randomColor(palette) {
+            const colors = palettes[palette];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        // Check if a new circle can be placed at a random position
+        function createNewCircle() {
+            for (let attempts = 0; attempts < 100; attempts++) {
+                let x = Math.random() * canvas.width;
+                let y = Math.random() * canvas.height;
+                let newCircle = new Circle(x, y, parseInt(maxRadiusInput.value), randomColor(paletteInput.value));
+                
+                // Check initial placement
+                let canPlace = true;
+                for (let other of circles) {
+                    let dist = Math.hypot(x - other.x, y - other.y);
+                    // Don't place if inside another circle or too close
+                    if (dist <= other.radius || dist < 2) {
+                        canPlace = false;
+                        break;
+                    }
+                }
+                
+                if (canPlace) {
+                    circles.push(newCircle);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Clear canvas and restart the animation
+        function restart() {
+            circles = [];
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // Animation loop
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Try to add a new circle
+            let addedNewCircle = createNewCircle();
+
+            // Draw and grow existing circles
+            let anyGrowing = false;
+            circles.forEach(circle => {
+                if (circle.growing) {
+                    if (!circle.hitsEdgeOrOtherCircles(circles)) {
+                        circle.grow();
+                        anyGrowing = true;
+                    } else if (circle.radius < 5) {
+                        // If circle can't grow and hasn't reached minimum size, remove it
+                        circles = circles.filter(c => c !== circle);
+                    } else {
+                        circle.growing = false;
+                    }
+                }
+                circle.draw(ctx);
+            });
+
+            // Continue animation if circles are growing or we can add more
+            if (anyGrowing || addedNewCircle) {
+                requestAnimationFrame(animate);
+            }
+        }
+
+        // Start the animation
+        restart();
+        animate();
+
+        // Add event listeners for controls
+        restartButton.addEventListener('click', () => {
+            restart();
+            animate();
+        });
+    </script>
+</body>
+</html>

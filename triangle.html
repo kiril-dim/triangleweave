@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Random Triangulation</title>
+    <style>
+        h1 {
+            text-align: center;
+            color: #333;
+            margin: 20px 0;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            display: block;
+            margin: 10px auto;
+        }
+        body {
+            background: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        .controls {
+            width: 80%;
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .slider-container {
+            margin: 10px 0;
+        }
+        .slider-container label {
+            display: inline-block;
+            width: 150px;
+            margin-right: 10px;
+        }
+        .slider-container input {
+            width: 200px;
+        }
+        .slider-container span {
+            margin-left: 10px;
+            min-width: 40px;
+            display: inline-block;
+        }
+        .button-container {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        button {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Triangle Weave</h1>
+    <div class="controls">
+        <div class="slider-container">
+            <label for="numPoints">Number of Points:</label>
+            <input type="range" id="numPoints" min="50" max="500" value="280" step="10">
+            <span id="numPointsValue">280</span>
+        </div>
+        <div class="slider-container">
+            <label for="speedMultiplier">Animation Speed:</label>
+            <input type="range" id="speedMultiplier" min="1" max="100" step="1" value="1">
+            <span id="speedMultiplierValue">1x</span>
+        </div>
+        <div class="slider-container">
+            <label for="pointSize">Point Size:</label>
+            <input type="range" id="pointSize" min="2" max="10" value="5">
+            <span id="pointSizeValue">5</span>
+        </div>
+        <div class="slider-container">
+            <label for="lineWidth">Line Thickness:</label>
+            <input type="range" id="lineWidth" min="1" max="5" value="2">
+            <span id="lineWidthValue">2</span>
+        </div>
+        <div class="slider-container">
+            <label for="simultaneousLines">Simultaneous Lines:</label>
+            <input type="range" id="simultaneousLines" min="1" max="10" value="4">
+            <span id="simultaneousLinesValue">4</span>
+        </div>
+        <div class="slider-container">
+            <label for="triangleBatchSize">Triangles Per Batch:</label>
+            <input type="range" id="triangleBatchSize" min="1" max="20" value="5">
+            <span id="triangleBatchSizeValue">5</span>
+        </div>
+        <div class="slider-container">
+            <label for="colorTheme">Color Theme:</label>
+            <select id="colorTheme">
+                <option value="pastel">Pastel Colors</option>
+                <option value="vibrant">Vibrant Colors</option>
+                <option value="earth">Earth Tones</option>
+                <option value="cool">Cool Colors</option>
+                <option value="warm">Warm Colors</option>
+                <option value="monochrome">Monochrome</option>
+            </select>
+        </div>
+        <div class="button-container">
+            <button id="restart">Start</button>
+            <button id="download">Download Image</button>
+        </div>
+    </div>
+    <canvas id="canvas"></canvas>
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth - 40;
+        canvas.height = window.innerHeight - 40;
+
+        // Object pooling for points
+        const pointPool = {
+            pool: [],
+            get(x, y) {
+                if (this.pool.length > 0) {
+                    const point = this.pool.pop();
+                    point.x = x;
+                    point.y = y;
+                    return point;
+                }
+                return {x, y};
+            },
+            release(point) {
+                this.pool.push(point);
+            }
+        };
+
+        function randomPoint() {
+            return pointPool.get(
+                Math.random() * canvas.width,
+                Math.random() * canvas.height
+            );
+        }
+
+        // Optimized Priority Queue using binary heap
+        class PriorityQueue {
+            constructor() {
+                this.values = [];
+            }
+
+            enqueue(element) {
+                this.values.push(element);
+                this._bubbleUp();
+            }
+
+            dequeue() {
+                if (this.values.length === 0) return null;
+                const min = this.values[0];
+                const end = this.values.pop();
+                if (this.values.length > 0) {
+                    this.values[0] = end;
+                    this._sinkDown();
+                }
+                return min;
+            }
+
+            get isEmpty() {
+                return this.values.length === 0;
+            }
+
+            _bubbleUp() {
+                let idx = this.values.length - 1;
+                const element = this.values[idx];
+                while (idx > 0) {
+                    const parentIdx = Math.floor((idx - 1) / 2);
+                    if (this.values[parentIdx].length <= element.length) break;
+                    this.values[idx] = this.values[parentIdx];
+                    idx = parentIdx;
+                }
+                this.values[idx] = element;
+            }
+
+            _sinkDown() {
+                let idx = 0;
+                const length = this.values.length;
+                const element = this.values[0];
+                
+                while (true) {
+                    const leftChildIdx = 2 * idx + 1;
+                    const rightChildIdx = 2 * idx + 2;
+                    let swap = null;
+                    
+                    if (leftChildIdx < length) {
+                        if (this.values[leftChildIdx].length < element.length) {
+                            swap = leftChildIdx;
+                        }
+                    }
+                    
+                    if (rightChildIdx < length) {
+                        if ((swap === null && this.values[rightChildIdx].length < element.length) || 
+                            (swap !== null && this.values[rightChildIdx].length < this.values[leftChildIdx].length)) {
+                            swap = rightChildIdx;
+                        }
+                    }
+                    
+                    if (swap === null) break;
+                    this.values[idx] = this.values[swap];
+                    idx = swap;
+                }
+                this.values[idx] = element;
+            }
+        }
+
+        // Optimized QuadTree
+        class QuadTree {
+            constructor(bounds, level = 0) {
+                this.bounds = bounds;
+                this.level = level;
+                this.lines = [];
+                this.children = null;
+                this.MAX_OBJECTS = 10;
+                this.MAX_LEVELS = 5;
+            }
+
+            _getBoundingBox(line) {
+                return {
+                    minX: Math.min(line.p1.x, line.p2.x),
+                    maxX: Math.max(line.p1.x, line.p2.x),
+                    minY: Math.min(line.p1.y, line.p2.y),
+                    maxY: Math.max(line.p1.y, line.p2.y)
+                };
+            }
+
+            subdivide() {
+                const width = this.bounds.width / 2;
+                const height = this.bounds.height / 2;
+                const x = this.bounds.x;
+                const y = this.bounds.y;
+
+                this.children = [
+                    new QuadTree({x, y, width, height}, this.level + 1),
+                    new QuadTree({x: x + width, y, width, height}, this.level + 1),
+                    new QuadTree({x, y: y + height, width, height}, this.level + 1),
+                    new QuadTree({x: x + width, y: y + height, width, height}, this.level + 1)
+                ];
+
+                for (const line of this.lines) {
+                    this._insertIntoChildren(line);
+                }
+                this.lines = [];
+            }
+
+            _boxIntersectsBounds(box, bounds) {
+                return !(box.maxX < bounds.x || box.minX > bounds.x + bounds.width ||
+                        box.maxY < bounds.y || box.minY > bounds.y + bounds.height);
+            }
+
+            _insertIntoChildren(line) {
+                const box = this._getBoundingBox(line);
+                for (const child of this.children) {
+                    if (this._boxIntersectsBounds(box, child.bounds)) {
+                        child.insert(line);
+                    }
+                }
+            }
+
+            insert(line) {
+                if (this.children !== null) {
+                    this._insertIntoChildren(line);
+                    return;
+                }
+
+                this.lines.push(line);
+                if (this.lines.length > this.MAX_OBJECTS && this.level < this.MAX_LEVELS) {
+                    this.subdivide();
+                }
+            }
+
+            findIntersections(newLine) {
+                const intersections = new Set();
+                this._findIntersections(newLine, intersections);
+                return Array.from(intersections);
+            }
+
+            _findIntersections(newLine, intersections) {
+                const box = this._getBoundingBox(newLine);
+                
+                if (this.children !== null) {
+                    for (const child of this.children) {
+                        if (this._boxIntersectsBounds(box, child.bounds)) {
+                            child._findIntersections(newLine, intersections);
+                        }
+                    }
+                } else {
+                    for (const line of this.lines) {
+                        if (doLinesIntersect(newLine.p1, newLine.p2, line.p1, line.p2)) {
+                            intersections.add(line);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Optimized triangle finding
+        function findTriangles(lines) {
+            const adjacencyMap = new Map();
+            
+            lines.forEach(line => {
+                const p1Key = `${line.p1.x},${line.p1.y}`;
+                const p2Key = `${line.p2.x},${line.p2.y}`;
+                
+                if (!adjacencyMap.has(p1Key)) adjacencyMap.set(p1Key, new Set());
+                if (!adjacencyMap.has(p2Key)) adjacencyMap.set(p2Key, new Set());
+                
+                adjacencyMap.get(p1Key).add(p2Key);
+                adjacencyMap.get(p2Key).add(p1Key);
+            });
+
+            const triangles = [];
+            const processed = new Set();
+
+            for (const [v1Key, neighbors] of adjacencyMap.entries()) {
+                for (const v2Key of neighbors) {
+                    for (const v3Key of neighbors) {
+                        if (v2Key >= v3Key) continue;
+                        
+                        if (adjacencyMap.get(v2Key).has(v3Key)) {
+                            const triangleKey = [v1Key, v2Key, v3Key].sort().join('|');
+                            if (!processed.has(triangleKey)) {
+                                processed.add(triangleKey);
+                                triangles.push([
+                                    parseVertex(v1Key),
+                                    parseVertex(v2Key),
+                                    parseVertex(v3Key)
+                                ]);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return triangles;
+        }
+
+        function parseVertex(key) {
+            const [x, y] = key.split(',').map(Number);
+            return pointPool.get(x, y);
+        }
+
+        // Helper functions
+        function getLineLength(p1, p2) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function doLinesIntersect(p1, p2, p3, p4) {
+            const minX1 = Math.min(p1.x, p2.x);
+            const maxX1 = Math.max(p1.x, p2.x);
+            const minY1 = Math.min(p1.y, p2.y);
+            const maxY1 = Math.max(p1.y, p2.y);
+            
+            const minX2 = Math.min(p3.x, p4.x);
+            const maxX2 = Math.max(p3.x, p4.x);
+            const minY2 = Math.min(p3.y, p4.y);
+            const maxY2 = Math.max(p3.y, p4.y);
+            
+            if (maxX1 < minX2 || minX1 > maxX2 || maxY1 < minY2 || minY1 > maxY2) {
+                return false;
+            }
+
+            if (Math.abs(p1.x - p3.x) < 0.001 && Math.abs(p1.y - p3.y) < 0.001) return false;
+            if (Math.abs(p1.x - p4.x) < 0.001 && Math.abs(p1.y - p4.y) < 0.001) return false;
+            if (Math.abs(p2.x - p3.x) < 0.001 && Math.abs(p2.y - p3.y) < 0.001) return false;
+            if (Math.abs(p2.x - p4.x) < 0.001 && Math.abs(p2.y - p4.y) < 0.001) return false;
+
+            const denominator = (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
+            if (Math.abs(denominator) < 0.001) return false;
+
+            const ua = ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) / denominator;
+            const ub = ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) / denominator;
+
+            const epsilon = 0.001;
+            return ua > epsilon && ua < (1 - epsilon) && ub > epsilon && ub < (1 - epsilon);
+        }
+
+        function getRandomPastelColor(existingColors = []) {
+            const theme = colorThemes[config.colorTheme];
+            const minHueDifference = 30;
+            let attempts = 0;
+            const maxAttempts = 50;
+            
+            while (attempts < maxAttempts) {
+                const hueRange = theme.hue[1] - theme.hue[0];
+                const hue = theme.hue[0] + (Math.random() * hueRange);
+                const color = `hsl(${hue}, ${theme.saturation}%, ${theme.lightness}%)`;
+                
+                if (existingColors.length === 0 || existingColors.every(existing => {
+                    const existingHue = parseInt(existing.match(/hsl\((\d+)/)[1]);
+                    const hueDiff = Math.min(
+                        Math.abs(hue - existingHue),
+                        Math.abs(hue - existingHue + 360),
+                        Math.abs(hue - existingHue - 360)
+                    );
+                    return hueDiff >= minHueDifference;
+                })) {
+                    return color;
+                }
+                attempts++;
+            }
+            
+            // Fallback color if no suitable color found
+            const hueRange = theme.hue[1] - theme.hue[0];
+            const hue = theme.hue[0] + (Math.random() * hueRange);
+            return `hsl(${hue}, ${theme.saturation}%, ${theme.lightness}%)`;
+        }
+
+        function buildTriangulation(points) {
+            const bounds = {
+                x: 0,
+                y: 0,
+                width: canvas.width,
+                height: canvas.height
+            };
+            const spatialIndex = new QuadTree(bounds);
+            const lines = [];
+            
+            const edgeQueue = new PriorityQueue();
+            for (let i = 0; i < points.length; i++) {
+                for (let j = i + 1; j < points.length; j++) {
+                    const length = getLineLength(points[i], points[j]);
+                    edgeQueue.enqueue({
+                        p1: points[i],
+                        p2: points[j],
+                        length: length
+                    });
+                }
+            }
+
+            while (!edgeQueue.isEmpty) {
+                const edge = edgeQueue.dequeue();
+                const intersections = spatialIndex.findIntersections(edge);
+                
+                if (intersections.length === 0) {
+                    lines.push(edge);
+                    spatialIndex.insert(edge);
+                }
+            }
+
+            return lines;
+        }
+
+        // Color themes configuration
+        const colorThemes = {
+            pastel: {
+                hue: [0, 360],
+                saturation: 70,
+                lightness: 80
+            },
+            vibrant: {
+                hue: [0, 360],
+                saturation: 100,
+                lightness: 50
+            },
+            earth: {
+                hue: [20, 120],
+                saturation: 60,
+                lightness: 60
+            },
+            cool: {
+                hue: [180, 270],
+                saturation: 70,
+                lightness: 70
+            },
+            warm: {
+                hue: [0, 60],
+                saturation: 80,
+                lightness: 65
+            },
+            monochrome: {
+                hue: [220, 220],
+                saturation: 30,
+                lightness: 65
+            }
+        };
+
+        // Configuration
+        let config = {
+            numPoints: 280,
+            speedMultiplier: 1,
+            pointSize: 5,
+            lineWidth: 2,
+            colorTheme: 'pastel',
+            simultaneousLines: 4,
+            triangleBatchSize: 5
+        };
+
+        // Update display values
+        function updateDisplayValues() {
+            document.getElementById('numPointsValue').textContent = config.numPoints;
+            document.getElementById('speedMultiplierValue').textContent = Math.round(config.speedMultiplier) + 'x';
+            document.getElementById('pointSizeValue').textContent = config.pointSize;
+            document.getElementById('lineWidthValue').textContent = config.lineWidth;
+            document.getElementById('simultaneousLinesValue').textContent = config.simultaneousLines;
+            document.getElementById('triangleBatchSizeValue').textContent = config.triangleBatchSize;
+        }
+
+        // Setup event listeners
+        document.getElementById('numPoints').addEventListener('input', (e) => {
+            config.numPoints = parseInt(e.target.value);
+            updateDisplayValues();
+        });
+
+        document.getElementById('speedMultiplier').addEventListener('input', (e) => {
+            config.speedMultiplier = parseFloat(e.target.value);
+            updateDisplayValues();
+        });
+
+        document.getElementById('pointSize').addEventListener('input', (e) => {
+            config.pointSize = parseInt(e.target.value);
+            updateDisplayValues();
+        });
+
+        document.getElementById('lineWidth').addEventListener('input', (e) => {
+            config.lineWidth = parseInt(e.target.value);
+            updateDisplayValues();
+        });
+
+        document.getElementById('simultaneousLines').addEventListener('input', (e) => {
+            config.simultaneousLines = parseInt(e.target.value);
+            updateDisplayValues();
+        });
+
+        document.getElementById('triangleBatchSize').addEventListener('input', (e) => {
+            config.triangleBatchSize = parseInt(e.target.value);
+            updateDisplayValues();
+        });
+
+        document.getElementById('colorTheme').addEventListener('change', (e) => {
+            config.colorTheme = e.target.value;
+            initializeAnimation();
+        });
+
+        // Initialize animation state
+        let points, actualPoints, lines, triangles;
+        let currentPointIndex = 0;
+        let currentLineIndex = 0;
+        let colorFillProgress = 0;
+        let animationFrameId = null;
+        let animationStage = 'points';
+
+        function initializeAnimation() {
+            // Clear any existing animation
+            if (animationFrameId !== null) {
+                cancelAnimationFrame(animationFrameId);
+            }
+            
+            // Reset state
+            points = Array.from({length: config.numPoints}, randomPoint);
+            actualPoints = points.slice(0, -2);
+            lines = buildTriangulation(actualPoints);
+            triangles = findTriangles(lines);
+            
+            // Initialize triangle colors here instead of outside
+            triangleColors.clear(); // Clear existing colors
+            triangles.forEach((triangle, index) => {
+                const neighboringColors = [];
+                triangles.forEach((otherTriangle, otherIndex) => {
+                    if (index !== otherIndex) {
+                        const sharesVertex = triangle.some(vertex =>
+                            otherTriangle.some(otherVertex =>
+                                Math.abs(vertex.x - otherVertex.x) < 0.001 &&
+                                Math.abs(vertex.y - otherVertex.y) < 0.001
+                            )
+                        );
+                        if (sharesVertex && triangleColors.has(otherIndex)) {
+                            neighboringColors.push(triangleColors.get(otherIndex));
+                        }
+                    }
+                });
+                
+                triangleColors.set(index, getRandomPastelColor(neighboringColors));
+            });
+            
+            currentPointIndex = 0;
+            currentLineIndex = 0;
+            colorFillProgress = 0;
+            animationStage = 'points';
+            lastTimestamp = 0;
+            lineStartTime = 0;
+            
+            // Start new animation
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        // Download functionality
+        function downloadCanvas() {
+            // Create a temporary link
+            const link = document.createElement('a');
+            link.download = 'triangulation.png';
+            
+            // Convert the canvas to a data URL
+            link.href = canvas.toDataURL('image/png');
+            
+            // Trigger the download
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        document.getElementById('restart').addEventListener('click', initializeAnimation);
+        document.getElementById('download').addEventListener('click', downloadCanvas);
+
+        // Animation timing variables
+        const basePointDelay = 60;
+        const baseLineAnimationDuration = 400;
+        const baseColorFillDuration = 2000;
+
+        function getPointDelay() {
+            return basePointDelay / config.speedMultiplier;
+        }
+
+        function getLineAnimationDuration() {
+            return baseLineAnimationDuration / config.speedMultiplier;
+        }
+
+        function getColorFillDuration() {
+            return baseColorFillDuration / config.speedMultiplier;
+        }
+        
+        let lastTimestamp = 0;
+        let lineStartTime = 0;
+        let currentLineProgress = 0;
+        
+        // Prepare triangle colors
+        const triangleColors = new Map();
+        triangles.forEach((triangle, index) => {
+            const neighboringColors = [];
+            triangles.forEach((otherTriangle, otherIndex) => {
+                if (index !== otherIndex) {
+                    const sharesVertex = triangle.some(vertex =>
+                        otherTriangle.some(otherVertex =>
+                            Math.abs(vertex.x - otherVertex.x) < 0.001 &&
+                            Math.abs(vertex.y - otherVertex.y) < 0.001
+                        )
+                    );
+                    if (sharesVertex && triangleColors.has(otherIndex)) {
+                        neighboringColors.push(triangleColors.get(otherIndex));
+                    }
+                }
+            });
+            
+            triangleColors.set(index, getRandomPastelColor(neighboringColors));
+        });
+
+        // Optimized animation function
+        function animate(timestamp) {
+            if (!lastTimestamp) {
+                lastTimestamp = timestamp;
+                requestAnimationFrame(animate);
+                return;
+            }
+
+            const deltaTime = Math.min(timestamp - lastTimestamp, 32);
+            lastTimestamp = timestamp;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Points animation
+            if (animationStage === 'points') {
+                for (let i = 0; i <= currentPointIndex; i++) {
+                    ctx.beginPath();
+                    ctx.fillStyle = '#000';
+                    ctx.arc(actualPoints[i].x, actualPoints[i].y, config.pointSize, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                if (timestamp % getPointDelay() < 16) {
+                    currentPointIndex++;
+                }
+
+                if (currentPointIndex >= actualPoints.length) {
+                    animationStage = 'lines';
+                    currentPointIndex = actualPoints.length - 1;
+                }
+            }
+
+            // Draw all points after points animation
+            if (animationStage !== 'points') {
+                ctx.beginPath();
+                ctx.fillStyle = '#000';
+                actualPoints.forEach(point => {
+                    ctx.arc(point.x, point.y, config.pointSize, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.beginPath();
+                });
+            }
+
+            // Lines animation
+            if (animationStage === 'lines') {
+                // Draw completed lines
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = config.lineWidth;
+                ctx.beginPath();
+                for (let i = 0; i < currentLineIndex && i < lines.length; i++) {
+                    ctx.moveTo(lines[i].p1.x, lines[i].p1.y);
+                    ctx.lineTo(lines[i].p2.x, lines[i].p2.y);
+                }
+                ctx.stroke();
+
+                // Animate current batch of lines
+                if (currentLineIndex < lines.length) {
+                    if (!lineStartTime) lineStartTime = timestamp;
+                    const lineProgress = (timestamp - lineStartTime) / getLineAnimationDuration();
+                    
+                    if (lineProgress >= 1) {
+                        currentLineIndex += config.simultaneousLines;
+                        lineStartTime = 0;
+                    } else {
+                        ctx.beginPath();
+                        const batchEnd = Math.min(currentLineIndex + config.simultaneousLines, lines.length);
+                        for (let i = currentLineIndex; i < batchEnd; i++) {
+                            const currentLine = lines[i];
+                            ctx.moveTo(currentLine.p1.x, currentLine.p1.y);
+                            ctx.lineTo(
+                                currentLine.p1.x + (currentLine.p2.x - currentLine.p1.x) * lineProgress,
+                                currentLine.p1.y + (currentLine.p2.y - currentLine.p1.y) * lineProgress
+                            );
+                        }
+                        ctx.stroke();
+                    }
+                } else {
+                    animationStage = 'colors';
+                }
+            }
+
+            // Draw all lines after lines animation
+            if (animationStage === 'colors') {
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                lines.forEach(line => {
+                    ctx.moveTo(line.p1.x, line.p1.y);
+                    ctx.lineTo(line.p2.x, line.p2.y);
+                });
+                ctx.stroke();
+            }
+
+                    // Modify the color fill animation section in the animate function
+            if (animationStage === 'colors') {
+                // Draw completed lines first
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = config.lineWidth;
+                ctx.beginPath();
+                lines.forEach(line => {
+                    ctx.moveTo(line.p1.x, line.p1.y);
+                    ctx.lineTo(line.p2.x, line.p2.y);
+                });
+                ctx.stroke();
+
+                // Update color fill progress
+                colorFillProgress += (deltaTime / getColorFillDuration());
+                
+                const batchSize = config.triangleBatchSize;
+                const completedBatches = Math.floor(colorFillProgress);
+                
+                // Draw all triangles up to current progress
+                triangles.forEach((triangle, i) => {
+                    const batchIndex = Math.floor(i / batchSize);
+                    if (batchIndex < completedBatches) {
+                        // Fully draw completed triangles
+                        ctx.beginPath();
+                        ctx.moveTo(triangle[0].x, triangle[0].y);
+                        ctx.lineTo(triangle[1].x, triangle[1].y);
+                        ctx.lineTo(triangle[2].x, triangle[2].y);
+                        ctx.closePath();
+                        ctx.fillStyle = triangleColors.get(i);
+                        ctx.fill();
+                    } else if (batchIndex === completedBatches) {
+                        // Animate current batch
+                        const progress = colorFillProgress % 1;
+                        ctx.beginPath();
+                        ctx.moveTo(triangle[0].x, triangle[0].y);
+                        ctx.lineTo(triangle[1].x, triangle[1].y);
+                        ctx.lineTo(triangle[2].x, triangle[2].y);
+                        ctx.closePath();
+                        const color = triangleColors.get(i);
+                        const [h, s, l] = color.match(/\d+/g).map(Number);
+                        ctx.fillStyle = `hsl(${h}, ${s}%, ${Math.min(100, l * progress)}%)`;
+                        ctx.fill();
+                    }
+                });
+
+                if (colorFillProgress >= Math.ceil(triangles.length / batchSize)) {
+                    animationStage = 'complete';
+                    points.forEach(point => pointPool.release(point));
+                }
+            }    
+
+
+            if (animationStage !== 'complete') {
+                animationFrameId = requestAnimationFrame(animate);
+            }
+        }
+
+        // Initialize the animation
+        window.addEventListener('load', () => {
+            initializeAnimation();
+        });
+        
+        // Update initial display values
+        updateDisplayValues();
+    </script>
+</body>
+</html>
