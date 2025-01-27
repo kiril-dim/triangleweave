@@ -1,4 +1,4 @@
-  <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -70,20 +70,29 @@
     <div class="controls" style="margin-bottom: 20px;">
         <div class="slider-container">
             <label for="maxLines">Max Lines:</label>
-            <input type="range" id="maxLines" min="10" max="200" value="50">
+            <input type="range" id="maxLines" min="10" max="300" value="50">
             <span id="maxLinesValue">50</span>
         </div>
         <div class="slider-container">
             <label for="growthSpeed">Growth Speed:</label>
-            <input type="range" id="growthSpeed" min="0.5" max="10" value="2" step="0.5">
+            <input type="range" id="growthSpeed" min="0.5" max="20" value="2" step="1">
             <span id="growthSpeedValue">2</span>
+        </div>
+        <div class="slider-container">
+            <label for="palette">Color Palette:</label>
+            <select id="palette">
+                <option value="pastel">Pastel Colors</option>
+                <option value="earth">Earth Tones</option>
+                <option value="vibrant">Vibrant Colors</option>
+            </select>
         </div>
         <div class="button-container">
             <button id="restart">Restart</button>
+            <button id="download">Download Image</button>
         </div>
     </div>
     
-    <canvas id="lineCanvas" width="800" height="600"></canvas>
+    <canvas id="lineCanvas" width="1200" height="800"></canvas>
 
     <script>
         class Line {
@@ -130,6 +139,79 @@
         const canvas = document.getElementById('lineCanvas');
         const ctx = canvas.getContext('2d');
         let lines = [];
+
+        // Predefined color palettes
+        const palettes = {
+            pastel: ['#FFB3BA', '#FFDFBA', '#FFFFBA', '#BAFFC9', '#BAE1FF'],
+            earth: ['#8B4513', '#CD853F', '#DEB887', '#F4A460', '#D2691E'],
+            vibrant: ['#FF5722', '#4CAF50', '#2196F3', '#FFC107', '#E91E63']
+        };
+
+        function getRandomColor() {
+            const colors = palettes[document.getElementById('palette').value];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        function floodFill(startX, startY, color) {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixels = imageData.data;
+            
+            // Get the color we're filling
+            const startPos = (startY * canvas.width + startX) * 4;
+            const startR = pixels[startPos];
+            const startG = pixels[startPos + 1];
+            const startB = pixels[startPos + 2];
+            
+            // Convert fill color from hex to RGB
+            const fillColor = color.match(/\w\w/g).map(x => parseInt(x, 16));
+            
+            // Stack for flood fill
+            const stack = [[startX, startY]];
+            
+            while (stack.length) {
+                const [x, y] = stack.pop();
+                const pos = (y * canvas.width + x) * 4;
+                
+                if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) continue;
+                if (pixels[pos] !== startR || pixels[pos + 1] !== startG || pixels[pos + 2] !== startB) continue;
+                
+                // Fill the pixel
+                pixels[pos] = fillColor[0];
+                pixels[pos + 1] = fillColor[1];
+                pixels[pos + 2] = fillColor[2];
+                pixels[pos + 3] = 255;
+                
+                // Add neighbors to stack
+                stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        function fillRegions() {
+            // Clear and set white background
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw all lines in black
+            lines.forEach(line => line.draw(ctx));
+            
+            // Find and fill regions
+            const step = 5; // Check every 5 pixels for better coverage
+            for (let y = 0; y < canvas.height; y += step) {
+                for (let x = 0; x < canvas.width; x += step) {
+                    const pixel = ctx.getImageData(x, y, 1, 1).data;
+                    // If we find a white pixel (background) and it hasn't been filled yet
+                    if (pixel[0] === 255 && pixel[1] === 255 && pixel[2] === 255 && pixel[3] === 255) {
+                        floodFill(x, y, getRandomColor());
+                    }
+                }
+            }
+            
+            // Redraw lines on top
+            lines.forEach(line => line.draw(ctx));
+        }
         
         // Get controls
         const maxLinesInput = document.getElementById('maxLines');
@@ -235,6 +317,12 @@
         }
 
         function animate() {
+            // Initialize with white background if first frame
+            if (!lines.length) {
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            
             // If there's no growing line, create a new one
             if (!lines.length || (!lines[lines.length - 1].growing1 && !lines[lines.length - 1].growing2)) {
                 lines.push(createNewLine());
@@ -258,6 +346,15 @@
             // Continue animation if we haven't reached max lines
             if (lines.length < parseInt(maxLinesInput.value)) {
                 requestAnimationFrame(animate);
+            } else {
+                // Check if the current line is still growing
+                const currentLine = lines[lines.length - 1];
+                if (!currentLine.growing1 && !currentLine.growing2) {
+                    // Only fill regions when the last line has stopped growing
+                    fillRegions();
+                } else {
+                    requestAnimationFrame(animate);
+                }
             }
         }
 
@@ -265,8 +362,19 @@
         function start() {
             lines = [];
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
             animate();
         }
+
+        // Add download button handler
+        const downloadButton = document.getElementById('download');
+        downloadButton.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'line-weave.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        });
 
         // Add restart button handler
         restartButton.addEventListener('click', start);
